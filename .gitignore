@@ -1,0 +1,27 @@
+# Data (CIFAR-10 auto-downloads, no need to track)
+data/
+
+# Virtual environment
+.venv/
+
+# Saved model checkpoints (too large for git)
+saved_models/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Claude
+.claude/
