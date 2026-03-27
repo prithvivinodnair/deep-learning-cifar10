@@ -22,6 +22,7 @@ KEY TERMS:
   Signs: training accuracy keeps increasing but validation accuracy plateaus.
 """
 
+import numpy as np
 import torch
 import torch.nn as nn
 import time
@@ -106,8 +107,15 @@ def train_one_epoch(model, loader, criterion, optimizer, device):
         # Get predictions: the class with the highest score
         # torch.max returns (max_values, indices). We want the indices.
         _, predicted = torch.max(outputs, 1)
-        total += labels.size(0)
-        correct += (predicted == labels).sum().item()
+        total += images.size(0)
+
+        # Handle soft labels from CutMix/MixUp (2D) vs standard integer labels (1D)
+        if labels.dim() > 1:
+            # Soft labels: compare predictions to the argmax of the soft targets
+            _, label_indices = torch.max(labels, 1)
+            correct += (predicted == label_indices).sum().item()
+        else:
+            correct += (predicted == labels).sum().item()
 
     avg_loss = running_loss / total
     accuracy = 100.0 * correct / total
@@ -174,7 +182,8 @@ def evaluate(model, loader, criterion, device):
     return avg_loss, accuracy, all_predictions, all_labels
 
 
-def train_model(model, train_loader, test_loader, epochs=30, lr=0.001, device=None):
+def train_model(model, train_loader, test_loader, epochs=30, lr=0.001, device=None,
+                criterion=None, optimizer=None, scheduler=None):
     """
     Complete training pipeline: train for multiple epochs and track progress.
 
@@ -225,7 +234,8 @@ def train_model(model, train_loader, test_loader, epochs=30, lr=0.001, device=No
     # CrossEntropyLoss: The standard loss for classification tasks.
     # It combines LogSoftmax + NLLLoss in one step.
     # It penalizes confident wrong predictions heavily.
-    criterion = nn.CrossEntropyLoss()
+    if criterion is None:
+        criterion = nn.CrossEntropyLoss()
 
     # --- OPTIMIZER ---
     # Adam (Adaptive Moment Estimation): An advanced optimizer that:
@@ -233,19 +243,21 @@ def train_model(model, train_loader, test_loader, epochs=30, lr=0.001, device=No
     # 2. Uses momentum (averages of past gradients) for smoother updates
     # 3. Adapts step sizes based on gradient history
     # Generally works well "out of the box" without much tuning.
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    if optimizer is None:
+        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     # --- LEARNING RATE SCHEDULER ---
     # ReduceLROnPlateau: Monitors test loss. If it hasn't improved for
     # 'patience' epochs, reduce the learning rate by factor.
     # Intuition: Big steps help early on, but we need smaller steps
     # to fine-tune as we get close to the optimal parameters.
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer,
-        mode='min',       # We want to MINIMIZE loss
-        factor=0.5,       # Multiply lr by 0.5 when triggered
-        patience=5,       # Wait 5 epochs before reducing
-    )
+    if scheduler is None:
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            mode='min',       # We want to MINIMIZE loss
+            factor=0.5,       # Multiply lr by 0.5 when triggered
+            patience=5,       # Wait 5 epochs before reducing
+        )
 
     # Track metrics for each epoch
     history = {
@@ -269,8 +281,11 @@ def train_model(model, train_loader, test_loader, epochs=30, lr=0.001, device=No
             model, test_loader, criterion, device
         )
 
-        # Step the scheduler based on test loss
-        scheduler.step(test_loss)
+        # Step the scheduler — ReduceLROnPlateau needs the metric, others don't
+        if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+            scheduler.step(test_loss)
+        else:
+            scheduler.step()
 
         epoch_time = time.time() - start_time
 
@@ -298,3 +313,64 @@ def train_model(model, train_loader, test_loader, epochs=30, lr=0.001, device=No
     print(f"Total training time: {total_time:.0f}s ({total_time/60:.1f} min)")
 
     return history
+
+
+def evaluate_with_probs(model, loader, device=None):
+    """
+    Evaluate a model and return predictions, labels, AND class probabilities.
+
+    Unlike evaluate(), this function computes softmax probabilities for each
+    class — needed for ROC curve analysis.
+
+    Parameters:
+    -----------
+    model : nn.Module
+        Trained model to evaluate.
+    loader : DataLoader
+        Test/validation data loader.
+    device : torch.device or None
+        If None, auto-detects GPU.
+
+    Returns:
+    --------
+    accuracy : float
+        Test accuracy as a percentage (0-100).
+    all_predictions : list of int
+        Predicted class for each sample.
+    all_labels : list of int
+        True class for each sample.
+    all_probabilities : numpy.ndarray, shape (N, num_classes)
+        Softmax probabilities for each sample across all classes.
+    """
+    if device is None:
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    model = model.to(device)
+    model.eval()
+
+    correct = 0
+    total = 0
+    all_predictions = []
+    all_labels = []
+    all_probabilities = []
+
+    with torch.no_grad():
+        for images, labels in loader:
+            images = images.to(device)
+            labels = labels.to(device)
+
+            outputs = model(images)
+            probs = torch.softmax(outputs, dim=1)
+
+            _, predicted = torch.max(outputs, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+
+            all_predictions.extend(predicted.cpu().numpy().tolist())
+            all_labels.extend(labels.cpu().numpy().tolist())
+            all_probabilities.append(probs.cpu().numpy())
+
+    accuracy = 100.0 * correct / total
+    all_probabilities = np.concatenate(all_probabilities, axis=0)
+
+    return accuracy, all_predictions, all_labels, all_probabilities

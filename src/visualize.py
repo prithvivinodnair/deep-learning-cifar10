@@ -398,3 +398,98 @@ def visualize_filters(model, figsize=(12, 4)):
 
 # Need torch import for visualize_filters
 import torch
+
+
+def plot_roc_curves(all_labels, all_probs, classes, figsize=(10, 8), title=None):
+    """
+    Plot per-class ROC curves using one-vs-rest approach.
+
+    For each class, we treat it as a binary problem: "is this class or not?"
+    and plot the ROC curve showing how well the model distinguishes it.
+
+    Parameters:
+    -----------
+    all_labels : list/array of int
+        True class indices (length N).
+    all_probs : numpy.ndarray, shape (N, num_classes)
+        Softmax probabilities for each sample.
+    classes : list of str
+        Class names.
+    """
+    from sklearn.metrics import roc_curve, auc
+
+    all_labels = np.array(all_labels)
+    n_classes = len(classes)
+
+    fig, ax = plt.subplots(figsize=figsize)
+    colors = plt.cm.tab10(np.linspace(0, 1, n_classes))
+
+    all_aucs = []
+    for i in range(n_classes):
+        # Binary: is this class i or not?
+        binary_labels = (all_labels == i).astype(int)
+        fpr, tpr, _ = roc_curve(binary_labels, all_probs[:, i])
+        roc_auc = auc(fpr, tpr)
+        all_aucs.append(roc_auc)
+        ax.plot(fpr, tpr, color=colors[i], linewidth=1.5,
+                label=f'{classes[i]} (AUC = {roc_auc:.3f})')
+
+    # Diagonal reference line (random classifier)
+    ax.plot([0, 1], [0, 1], 'k--', linewidth=1, alpha=0.5, label='Random')
+
+    macro_auc = np.mean(all_aucs)
+    ax.set_xlabel('False Positive Rate', fontsize=12)
+    ax.set_ylabel('True Positive Rate', fontsize=12)
+    ax.set_title(title or f'ROC Curves (Macro AUC = {macro_auc:.3f})',
+                 fontsize=14, fontweight='bold')
+    ax.legend(fontsize=9, loc='lower right')
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    return fig
+
+
+def plot_roc_comparison(model_results, classes, figsize=(10, 7)):
+    """
+    Compare macro-average ROC curves across multiple models.
+
+    Parameters:
+    -----------
+    model_results : dict
+        {model_name: (labels, probabilities)} where labels is list of int
+        and probabilities is numpy array (N, num_classes).
+    classes : list of str
+        Class names.
+    """
+    from sklearn.metrics import roc_curve, auc
+
+    fig, ax = plt.subplots(figsize=figsize)
+    colors = plt.cm.Set1(np.linspace(0, 1, len(model_results)))
+
+    for (model_name, (labels, probs)), color in zip(model_results.items(), colors):
+        labels = np.array(labels)
+        n_classes = len(classes)
+
+        # Compute macro-average ROC: average across all classes
+        all_fpr = np.linspace(0, 1, 100)
+        mean_tpr = np.zeros_like(all_fpr)
+
+        for i in range(n_classes):
+            binary_labels = (labels == i).astype(int)
+            fpr, tpr, _ = roc_curve(binary_labels, probs[:, i])
+            mean_tpr += np.interp(all_fpr, fpr, tpr)
+
+        mean_tpr /= n_classes
+        macro_auc = auc(all_fpr, mean_tpr)
+
+        ax.plot(all_fpr, mean_tpr, color=color, linewidth=2,
+                label=f'{model_name} (AUC = {macro_auc:.3f})')
+
+    ax.plot([0, 1], [0, 1], 'k--', linewidth=1, alpha=0.5, label='Random')
+
+    ax.set_xlabel('False Positive Rate', fontsize=12)
+    ax.set_ylabel('True Positive Rate', fontsize=12)
+    ax.set_title('ROC Curve Comparison (Macro-Average)', fontsize=14, fontweight='bold')
+    ax.legend(fontsize=11, loc='lower right')
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    return fig

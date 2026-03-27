@@ -186,6 +186,51 @@ def get_raw_cifar10(data_dir='../data'):
     return train_dataset, test_dataset
 
 
+def get_cifar10_loaders_advanced(batch_size=64, data_dir='../data', num_workers=0):
+    """
+    Create DataLoaders with heavier augmentation for training tricks experiments.
+
+    Adds ColorJitter and RandomErasing on top of the standard flips/crops.
+    These extra augmentations force the model to be more robust and can
+    improve accuracy by 3-5% when combined with other training tricks.
+
+    Returns:
+    --------
+    train_loader, test_loader : DataLoader
+    """
+    transform_train = transforms.Compose([
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomCrop(32, padding=4),
+        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=CIFAR10_MEAN, std=CIFAR10_STD),
+        transforms.RandomErasing(p=0.5),
+    ])
+
+    transform_test = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(mean=CIFAR10_MEAN, std=CIFAR10_STD),
+    ])
+
+    train_dataset = torchvision.datasets.CIFAR10(
+        root=data_dir, train=True, download=True, transform=transform_train
+    )
+    test_dataset = torchvision.datasets.CIFAR10(
+        root=data_dir, train=False, download=True, transform=transform_test
+    )
+
+    train_loader = DataLoader(
+        train_dataset, batch_size=batch_size, shuffle=True,
+        num_workers=num_workers, pin_memory=True
+    )
+    test_loader = DataLoader(
+        test_dataset, batch_size=batch_size, shuffle=False,
+        num_workers=num_workers, pin_memory=True
+    )
+
+    return train_loader, test_loader
+
+
 # ============================================================================
 # NumPy Arrays (for traditional ML with scikit-learn)
 # ============================================================================

@@ -20,8 +20,10 @@ KEY ARCHITECTURE CONCEPTS:
   input connects to every output. Used at the end to map features to class scores.
 """
 
+import numpy as np
 import torch
 import torch.nn as nn
+import torchvision.models as tv_models
 
 
 class SimpleCNN(nn.Module):
@@ -202,3 +204,89 @@ def count_parameters(model):
     more risk of overfitting and longer training time.
     """
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+
+def cifar_resnet18(num_classes=10):
+    """
+    Create a ResNet-18 modified for CIFAR-10's 32x32 images.
+
+    Standard ResNet-18 is designed for ImageNet (224x224). For 32x32 CIFAR images
+    we need two modifications:
+    1. Replace the 7x7 stride-2 conv1 with a 3x3 stride-1 conv (preserves spatial info)
+    2. Remove the early max pooling layer (32x32 is already small)
+
+    Without these changes, the spatial dimensions would shrink too aggressively
+    and the network would lose important spatial information.
+
+    Parameters:
+    -----------
+    num_classes : int
+        Number of output classes. Default 10 for CIFAR-10.
+
+    Returns:
+    --------
+    model : nn.Module
+        Modified ResNet-18 ready for CIFAR-10 training.
+    """
+    model = tv_models.resnet18(weights=None)
+
+    # Replace first conv: 7x7 stride-2 → 3x3 stride-1 (keeps 32x32 resolution)
+    model.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
+
+    # Remove max pooling (would shrink 32x32 too aggressively)
+    model.maxpool = nn.Identity()
+
+    # Replace final fully connected layer for our number of classes
+    model.fc = nn.Linear(model.fc.in_features, num_classes)
+
+    return model
+
+
+def extract_features(model, loader, device=None):
+    """
+    Extract feature vectors from a trained SimpleCNN's feature extractor.
+
+    Runs all images through model.features + flatten, producing a rich
+    4096-dimensional representation that captures learned visual patterns.
+    These features can then be fed to traditional ML models like XGBoost.
+
+    Parameters:
+    -----------
+    model : SimpleCNN
+        A trained SimpleCNN model (must have a .features attribute).
+    loader : DataLoader
+        Data loader for the images to extract features from.
+    device : torch.device or None
+        If None, auto-detects GPU.
+
+    Returns:
+    --------
+    features : numpy.ndarray, shape (N, feature_dim)
+        Extracted feature vectors (e.g., 4096-dim for SimpleCNN).
+    labels : numpy.ndarray, shape (N,)
+        Corresponding class labels.
+    """
+    if device is None:
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    model = model.to(device)
+    model.eval()
+
+    all_features = []
+    all_labels = []
+
+    with torch.no_grad():
+        for images, batch_labels in loader:
+            images = images.to(device)
+
+            # Run through feature extractor only
+            feats = model.features(images)
+            feats = feats.view(feats.size(0), -1)  # Flatten
+
+            all_features.append(feats.cpu().numpy())
+            all_labels.extend(batch_labels.numpy().tolist())
+
+    features = np.concatenate(all_features, axis=0)
+    labels = np.array(all_labels)
+
+    return features, labels

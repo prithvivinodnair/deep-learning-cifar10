@@ -8,3 +8,4 @@ pandas>=1.5
 jupyter>=1.0
 notebook>=7.0
 Pillow>=9.0
+xgboost>=1.7
