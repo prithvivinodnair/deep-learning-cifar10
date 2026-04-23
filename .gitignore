@@ -4,8 +4,16 @@ data/
 # Virtual environment
 .venv/
 
-# Saved model checkpoints (too large for git)
-saved_models/
+# Saved model checkpoints
+# Root-level saved_models/ (CIFAR-10 work) is fully ignored — models and
+# loose results JSONs were never meant to be tracked.
+/saved_models/
+# For nested saved_models/ folders (e.g. robotics_analysis/saved_models/),
+# only block the binary weights — keep the small results JSONs so reviewers
+# can inspect training histories without rerunning the notebooks.
+**/saved_models/*.pth
+**/saved_models/*.pt
+**/saved_models/*.ckpt
 
 # Python cache
 __pycache__/
